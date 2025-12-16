@@ -1,0 +1,264 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Shortix Infrastructure: Application Stack (03-application)'
+
+Parameters:
+  VpcId:
+    Type: String
+    Description: VPC ID from Networking Stack
+  PrivateSubnetIds:
+    Type: String
+    Description: Comma-separated list of Private Subnet IDs
+  DynamoDBTableName:
+    Type: String
+    Description: DynamoDB Table Name
+  UserPoolId:
+    Type: String
+    Description: Cognito User Pool ID
+  ArtifactBucketName:
+    Type: String
+    Description: S3 Bucket Name for Lambda Artifacts
+  LambdaZipKey:
+    Type: String
+    Description: S3 Key for the Lambda function Code (zip)
+
+Resources:
+  # IAM Role for Lambda
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaBasicExecution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+        - PolicyName: VPCAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                Resource: "*"
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDBTableName}*"
+
+  # Lambda Functions
+  CreateUrlFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: create_url.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref ArtifactBucketName
+        S3Key: !Ref LambdaZipKey
+      Runtime: nodejs18.x
+      Timeout: 10
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds: !Split [",", !Ref PrivateSubnetIds]
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref DynamoDBTableName
+
+  GetUrlsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: get_urls.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref ArtifactBucketName
+        S3Key: !Ref LambdaZipKey
+      Runtime: nodejs18.x
+      Timeout: 10
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds: !Split [",", !Ref PrivateSubnetIds]
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref DynamoDBTableName
+
+  RedirectUrlFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: redirect_url.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref ArtifactBucketName
+        S3Key: !Ref LambdaZipKey
+      Runtime: nodejs18.x
+      Timeout: 10
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds: !Split [",", !Ref PrivateSubnetIds]
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref DynamoDBTableName
+
+  # Lambda Security Group
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Lambda functions
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: -1 # Allow all internal traffic from itself (optional, mainly for egress)
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0 # Open egress usually but restrict ingress.
+      # Actually, Lambda SG is primarily for controlling what it can access.
+      # We just need it to exist to attach to VPC.
+      # Let's lock it down a bit more, no ingress needed.
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+
+  # API Gateway
+  RestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: ShortixApi
+      Description: API for Shortix URL Shortener
+
+  # Cognito Authorizer
+  CognitoAuthorizer:
+    Type: AWS::ApiGateway::Authorizer
+    Properties:
+      Name: UserPoolAuthorizer
+      Type: COGNITO_USER_POOLS
+      IdentitySource: method.request.header.Authorization
+      RestApiId: !Ref RestApi
+      ProviderARNs:
+        - !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
+
+  # API Resources & Methods
+  # POST /urls (Protected)
+  UrlsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: urls
+
+  CreateUrlMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      HttpMethod: POST
+      ResourceId: !Ref UrlsResource
+      RestApiId: !Ref RestApi
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateUrlFunction.Arn}/invocations"
+
+  GetUrlsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      HttpMethod: GET
+      ResourceId: !Ref UrlsResource
+      RestApiId: !Ref RestApi
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST # Lambda integration always uses POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetUrlsFunction.Arn}/invocations"
+
+  # GET /{short_code} (Public)
+  ShortCodeResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: "{short_code}"
+
+  RedirectUrlMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      ResourceId: !Ref ShortCodeResource
+      RestApiId: !Ref RestApi
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${RedirectUrlFunction.Arn}/invocations"
+
+  # Lambda Permissions (Allow API Gateway to invoke)
+  CreateUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CreateUrlFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/*"
+
+  GetUrlsPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref GetUrlsFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/*"
+
+  RedirectUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref RedirectUrlFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/*"
+
+  # Deployment
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - CreateUrlMethod
+      - GetUrlsMethod
+      - RedirectUrlMethod
+    Properties:
+      RestApiId: !Ref RestApi
+
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      DeploymentId: !Ref ApiDeployment
+      RestApiId: !Ref RestApi
+      StageName: prod
+
+Outputs:
+  ApiUrl:
+    Description: URL of the API Gateway
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
