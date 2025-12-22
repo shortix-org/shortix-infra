@@ -86,7 +86,7 @@ Resources:
   CreateUrlFunction:
     Type: AWS::Lambda::Function
     Properties:
-      Handler: create_url.handler
+      Handler: handlers/create_url.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
         S3Bucket: !Ref ArtifactBucketName
@@ -106,7 +106,7 @@ Resources:
   GetUrlsFunction:
     Type: AWS::Lambda::Function
     Properties:
-      Handler: get_urls.handler
+      Handler: handlers/get_urls.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
         S3Bucket: !Ref ArtifactBucketName
@@ -126,7 +126,7 @@ Resources:
   RedirectUrlFunction:
     Type: AWS::Lambda::Function
     Properties:
-      Handler: redirect_url.handler
+      Handler: handlers/redirect_url.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
         S3Bucket: !Ref ArtifactBucketName
