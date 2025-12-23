@@ -15,54 +15,13 @@ Resources:
           AttributeType: S
         - AttributeName: gsi1_pk
           AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
       KeySchema:
         - AttributeName: pk
           KeyType: HASH
         - AttributeName: sk
           KeyType: RANGE
-      GlobalSecondaryIndexes:
-        - IndexName: UserUrlsIndex
-          KeySchema:
-            - AttributeName: gsi1_pk
-              KeyType: HASH
-            - AttributeName: created_at
-              KeyType: RANGE # Implicitly adding created_at for sorting user URLs if needed, though specs just said GSI PK. Adding SK for sortability is best practice. 
-              # Wait, specs only listed gsi1_pk. Let's re-read carefully: "gsi1_pk: Value USER#{user_id}".
-              # It doesn't explicitly ask for a SK in GSI, but for "List URLs", sorting by time is standard.
-              # However, to strictly follow specs, I will check if 'created_at' was defined.
-              # "created_at: ISO Timestamp".
-              # I'll stick to the spec strictly first, or add a comment.
-              # Actually, without a SK in GSI, you can only query equality.
-              # Let's add created_at as GSI SK for ordering. I'll need to add it to AttributeDefinitions too.
-      # Correction: I will strictly follow the table design in the plan/specs.
-      # Spec: gsi1_pk | String | GSI 1 Partition
-      # Spec: created_at | String | Attribute
-      # If I add created_at to KeySchema of GSI, I must add it to AttributeDefinitions.
-      # I will proceed with just gsi1_pk as HASH for now to be safe, or assuming a simple GSI.
-          Projection:
-            ProjectionType: ALL
-
-  # Re-evaluating GSI:
-  # If I only have specific attributes, I will use them.
-  # The spec didn't explicitly demand a sort key for GSI, but it listed "created_at".
-  # To avoid "Schema Error", I will add 'created_at' to AttributeDefinitions if I use it.
-  # Let's stick to the simplest interpretation: GSI PK only.
-  # Wait, you can't have a GSI with only Hash Key if you want to sort.
-  # But I can't guess. I will add created_at if I need to sort.
-  # Let's look at the spec: "Show list of URLs created by the current user."
-  # It implies a query on GSI1.
-  # I'll add 'created_at' as Range Key for GSI1 to allow sorting.
-  
-      AttributeDefinitions:
-        - AttributeName: pk
-          AttributeType: S
-        - AttributeName: sk
-          AttributeType: S
-        - AttributeName: gsi1_pk
-          AttributeType: S
-        - AttributeName: created_at
-          AttributeType: S
-
       GlobalSecondaryIndexes:
         - IndexName: UserUrlsIndex
           KeySchema:
@@ -113,6 +72,74 @@ Resources:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
 
+  # Website Hosting Bucket
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # CloudFront Origin Access Control
+  CloudFrontOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Description: 'OAC for Website Bucket'
+        Name: !Sub "${AWS::StackName}-OAC"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # CloudFront Distribution
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Origins:
+          - DomainName: !GetAtt WebsiteBucket.DomainName
+            Id: WebsiteBucketOrigin
+            S3OriginConfig:
+              OriginAccessIdentity: "" # Using OAC instead
+            OriginAccessControlId: !Ref CloudFrontOriginAccessControl
+        Enabled: true
+        DefaultRootObject: index.html
+        DefaultCacheBehavior:
+          TargetOriginId: WebsiteBucketOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+        # SPA Routing: Redirect 404s to index.html
+        CustomErrorResponses:
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+        Comment: !Sub "Distribution for ${AWS::StackName} website"
+
+  # Bucket Policy for CloudFront OAC Access
+  WebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebsiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "arn:aws:s3:::${WebsiteBucket}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+
 Outputs:
   DynamoDBTableName:
     Description: Name of the DynamoDB Table
@@ -137,3 +164,21 @@ Outputs:
     Value: !Ref ArtifactBucket
     Export:
       Name: !Sub "${AWS::StackName}-ArtifactBucketName"
+
+  WebsiteBucketName:
+    Description: Name of the S3 Website Bucket
+    Value: !Ref WebsiteBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-WebsiteBucketName"
+
+  CloudFrontDistributionId:
+    Description: ID of the CloudFront Distribution
+    Value: !Ref CloudFrontDistribution
+    Export:
+      Name: !Sub "${AWS::StackName}-CloudFrontDistributionId"
+
+  CloudFrontDomainName:
+    Description: Domain name of the CloudFront Distribution
+    Value: !GetAtt CloudFrontDistribution.DomainName
+    Export:
+      Name: !Sub "${AWS::StackName}-CloudFrontDomainName"
