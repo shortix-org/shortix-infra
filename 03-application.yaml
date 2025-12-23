@@ -328,6 +328,14 @@ Resources:
       RestApiId: !Ref RestApi
       StageName: prod
 
+  # SSM Parameters
+  ApiUrlParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /shortix/prod/api/url
+      Type: String
+      Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+
 Outputs:
   ApiUrl:
     Description: URL of the API Gateway

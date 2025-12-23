@@ -140,6 +140,56 @@ Resources:
               StringEquals:
                 AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
 
+  # SSM Parameters
+  DynamoDBTableNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /shortix/prod/persistence/table-name
+      Type: String
+      Value: !Ref UrlShortenerTable
+
+  UserPoolIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /shortix/prod/auth/user-pool-id
+      Type: String
+      Value: !Ref CognitoUserPool
+
+  UserPoolClientIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /shortix/prod/auth/client-id
+      Type: String
+      Value: !Ref CognitoUserPoolClient
+
+  WebsiteBucketNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /shortix/prod/web/bucket-name
+      Type: String
+      Value: !Ref WebsiteBucket
+
+  ArtifactBucketNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /shortix/prod/persistence/artifact-bucket-name
+      Type: String
+      Value: !Ref ArtifactBucket
+
+  CloudFrontDistributionIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /shortix/prod/web/distribution-id
+      Type: String
+      Value: !Ref CloudFrontDistribution
+
+  CloudFrontDomainNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /shortix/prod/web/domain-name
+      Type: String
+      Value: !GetAtt CloudFrontDistribution.DomainName
+
 Outputs:
   DynamoDBTableName:
     Description: Name of the DynamoDB Table

@@ -143,6 +143,28 @@ Resources:
       SubnetId: !Ref PrivateSubnet2
       RouteTableId: !Ref PrivateRouteTable
 
+  # SSM Parameters
+  VpcIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /shortix/prod/networking/vpc-id
+      Type: String
+      Value: !Ref VPC
+
+  PublicSubnetIdsParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /shortix/prod/networking/public-subnets
+      Type: String
+      Value: !Join [",", [!Ref PublicSubnet1, !Ref PublicSubnet2]]
+
+  PrivateSubnetIdsParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /shortix/prod/networking/private-subnets
+      Type: String
+      Value: !Join [",", [!Ref PrivateSubnet1, !Ref PrivateSubnet2]]
+
 Outputs:
   VpcId:
     Description: The ID of the VPC
