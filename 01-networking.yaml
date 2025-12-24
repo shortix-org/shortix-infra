@@ -70,20 +70,26 @@ Resources:
         - Key: Name
           Value: shortix-private-subnet-2
 
-  # NAT Gateway (Single NAT for cost optimization in this example, normally one per AZ)
-  NatGatewayEIP:
-    Type: AWS::EC2::EIP
+  # VPC Endpoints (Gateway type for S3 and DynamoDB are free and provide private access)
+  DynamoDBEndpoint:
+    Type: AWS::EC2::VPCEndpoint
     Properties:
-      Domain: vpc
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.dynamodb"
+      VpcId: !Ref VPC
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PublicRouteTable
+        - !Ref PrivateRouteTable
 
-  NatGateway:
-    Type: AWS::EC2::NatGateway
+  S3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
     Properties:
-      AllocationId: !GetAtt NatGatewayEIP.AllocationId
-      SubnetId: !Ref PublicSubnet1
-      Tags:
-        - Key: Name
-          Value: shortix-nat-gateway
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcId: !Ref VPC
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PublicRouteTable
+        - !Ref PrivateRouteTable
 
   # Route Tables
   PublicRouteTable:
@@ -111,12 +117,6 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
 
-  PrivateRoute:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref PrivateRouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NatGateway
 
   # Subnet Associations
   PublicSubnet1RouteTableAssociation:
