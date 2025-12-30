@@ -2,21 +2,20 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: 'Shortix Infrastructure: Application Stack (03-application)'
 
 Parameters:
+  Environment:
+    Type: String
+    Default: prod
+    Description: Environment name (e.g., dev, staging, prod)
   VpcId:
-    Type: String
-    Description: VPC ID from Networking Stack
+    Type: 'AWS::SSM::Parameter::Value<String>'
   PrivateSubnetIds:
-    Type: String
-    Description: Comma-separated list of Private Subnet IDs
+    Type: 'AWS::SSM::Parameter::Value<String>'
   DynamoDBTableName:
-    Type: String
-    Description: DynamoDB Table Name
+    Type: 'AWS::SSM::Parameter::Value<String>'
   UserPoolId:
-    Type: String
-    Description: Cognito User Pool ID
+    Type: 'AWS::SSM::Parameter::Value<String>'
   ArtifactBucketName:
-    Type: String
-    Description: S3 Bucket Name for Lambda Artifacts
+    Type: 'AWS::SSM::Parameter::Value<String>'
   LambdaZipKey:
     Type: String
     Description: S3 Key for the Lambda function Code (zip)
@@ -326,15 +325,15 @@ Resources:
     Properties:
       DeploymentId: !Ref ApiDeployment
       RestApiId: !Ref RestApi
-      StageName: prod
+      StageName: !Ref Environment
 
   # SSM Parameters
   ApiUrlParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: /shortix/prod/api/url
+      Name: !Sub "/shortix/${Environment}/api/url"
       Type: String
-      Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+      Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
 
 Outputs:
   ApiUrl:

@@ -1,6 +1,12 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'Shortix Infrastructure: Persistence & Auth Stack (02-persistence-auth)'
 
+Parameters:
+  Environment:
+    Type: String
+    Default: prod
+    Description: Environment name (e.g., dev, staging, prod)
+
 Resources:
   # DynamoDB Table
   UrlShortenerTable:
@@ -144,49 +150,49 @@ Resources:
   DynamoDBTableNameParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: /shortix/prod/persistence/table-name
+      Name: !Sub "/shortix/${Environment}/persistence/table-name"
       Type: String
       Value: !Ref UrlShortenerTable
 
   UserPoolIdParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: /shortix/prod/auth/user-pool-id
+      Name: !Sub "/shortix/${Environment}/auth/user-pool-id"
       Type: String
       Value: !Ref CognitoUserPool
 
   UserPoolClientIdParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: /shortix/prod/auth/client-id
+      Name: !Sub "/shortix/${Environment}/auth/client-id"
       Type: String
       Value: !Ref CognitoUserPoolClient
 
   WebsiteBucketNameParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: /shortix/prod/web/bucket-name
+      Name: !Sub "/shortix/${Environment}/web/bucket-name"
       Type: String
       Value: !Ref WebsiteBucket
 
   ArtifactBucketNameParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: /shortix/prod/persistence/artifact-bucket-name
+      Name: !Sub "/shortix/${Environment}/persistence/artifact-bucket-name"
       Type: String
       Value: !Ref ArtifactBucket
 
   CloudFrontDistributionIdParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: /shortix/prod/web/distribution-id
+      Name: !Sub "/shortix/${Environment}/web/distribution-id"
       Type: String
       Value: !Ref CloudFrontDistribution
 
   CloudFrontDomainNameParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: /shortix/prod/web/domain-name
+      Name: !Sub "/shortix/${Environment}/web/domain-name"
       Type: String
       Value: !GetAtt CloudFrontDistribution.DomainName
 
