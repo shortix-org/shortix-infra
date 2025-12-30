@@ -55,6 +55,12 @@ Resources:
           RequireNumbers: true
           RequireSymbols: false
           RequireUppercase: true
+      EmailConfiguration:
+        EmailSendingAccount: COGNITO_DEFAULT
+      VerificationMessageTemplate:
+        DefaultEmailOption: CONFIRM_WITH_CODE
+        EmailSubject: "Shortix Verification Code"
+        EmailMessage: "Your verification code is {####}. Welcome to Shortix!"
 
   # Cognito User Pool Client
   CognitoUserPoolClient:
