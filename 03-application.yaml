@@ -6,10 +6,6 @@ Parameters:
     Type: String
     Default: prod
     Description: Environment name (e.g., dev, staging, prod)
-  VpcId:
-    Type: 'AWS::SSM::Parameter::Value<String>'
-  PrivateSubnetIds:
-    Type: 'AWS::SSM::Parameter::Value<String>'
   DynamoDBTableName:
     Type: 'AWS::SSM::Parameter::Value<String>'
   UserPoolId:
@@ -57,16 +53,6 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: arn:aws:logs:*:*:*
-        - PolicyName: VPCAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ec2:CreateNetworkInterface
-                  - ec2:DescribeNetworkInterfaces
-                  - ec2:DeleteNetworkInterface
-                Resource: "*"
         - PolicyName: DynamoDBAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -102,10 +88,7 @@ Resources:
       Timeout: 10
       Layers:
         - !Ref ShortixLayer
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
-        SubnetIds: !Split [",", !Ref PrivateSubnetIds]
+
       Environment:
         Variables:
           TABLE_NAME: !Ref DynamoDBTableName
@@ -123,10 +106,7 @@ Resources:
       Timeout: 10
       Layers:
         - !Ref ShortixLayer
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
-        SubnetIds: !Split [",", !Ref PrivateSubnetIds]
+
       Environment:
         Variables:
           TABLE_NAME: !Ref DynamoDBTableName
@@ -143,33 +123,12 @@ Resources:
       Timeout: 10
       Layers:
         - !Ref ShortixLayer
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
-        SubnetIds: !Split [",", !Ref PrivateSubnetIds]
+
       Environment:
         Variables:
           TABLE_NAME: !Ref DynamoDBTableName
 
-  # Lambda Security Group
-  LambdaSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for Lambda functions
-      VpcId: !Ref VpcId
-      SecurityGroupIngress:
-        - IpProtocol: -1 # Allow all internal traffic from itself (optional, mainly for egress)
-          FromPort: -1
-          ToPort: -1
-          CidrIp: 0.0.0.0/0 # Open egress usually but restrict ingress.
-      # Actually, Lambda SG is primarily for controlling what it can access.
-      # We just need it to exist to attach to VPC.
-      # Let's lock it down a bit more, no ingress needed.
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          FromPort: -1
-          ToPort: -1
-          CidrIp: 0.0.0.0/0
+
 
   # API Gateway
   RestApi:
@@ -349,10 +308,7 @@ Resources:
       Timeout: 10
       Layers:
         - !Ref ShortixLayer
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
-        SubnetIds: !Split [",", !Ref PrivateSubnetIds]
+
 
   ScanMalwareFunction:
     Type: AWS::Lambda::Function
@@ -366,10 +322,7 @@ Resources:
       Timeout: 10
       Layers:
         - !Ref ShortixLayer
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
-        SubnetIds: !Split [",", !Ref PrivateSubnetIds]
+
 
   UpdateUrlStatusFunction:
     Type: AWS::Lambda::Function
@@ -383,10 +336,7 @@ Resources:
       Timeout: 10
       Layers:
         - !Ref ShortixLayer
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
-        SubnetIds: !Split [",", !Ref PrivateSubnetIds]
+
       Environment:
         Variables:
           TABLE_NAME: !Ref DynamoDBTableName
