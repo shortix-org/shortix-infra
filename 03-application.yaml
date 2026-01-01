@@ -80,6 +80,14 @@ Resources:
                   - dynamodb:Query
                   - dynamodb:Scan
                 Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDBTableName}*"
+        - PolicyName: StepFunctionsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:UrlVerificationStateMachine-*"
 
   # Lambda Functions
   CreateUrlFunction:
@@ -101,6 +109,7 @@ Resources:
       Environment:
         Variables:
           TABLE_NAME: !Ref DynamoDBTableName
+          STATE_MACHINE_ARN: !Ref UrlVerificationStateMachine
 
   GetUrlsFunction:
     Type: AWS::Lambda::Function
@@ -326,6 +335,203 @@ Resources:
       DeploymentId: !Ref ApiDeployment
       RestApiId: !Ref RestApi
       StageName: !Ref Environment
+
+  # Link Verification Resources
+  CheckLivenessFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: handlers/check_liveness.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref ArtifactBucketName
+        S3Key: !Ref LambdaZipKey
+      Runtime: nodejs18.x
+      Timeout: 10
+      Layers:
+        - !Ref ShortixLayer
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds: !Split [",", !Ref PrivateSubnetIds]
+
+  ScanMalwareFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: handlers/scan_malware.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref ArtifactBucketName
+        S3Key: !Ref LambdaZipKey
+      Runtime: nodejs18.x
+      Timeout: 10
+      Layers:
+        - !Ref ShortixLayer
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds: !Split [",", !Ref PrivateSubnetIds]
+
+  UpdateUrlStatusFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: handlers/update_url_status.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref ArtifactBucketName
+        S3Key: !Ref LambdaZipKey
+      Runtime: nodejs18.x
+      Timeout: 10
+      Layers:
+        - !Ref ShortixLayer
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds: !Split [",", !Ref PrivateSubnetIds]
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref DynamoDBTableName
+
+  StepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeLambda
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !GetAtt CheckLivenessFunction.Arn
+                  - !GetAtt ScanMalwareFunction.Arn
+                  - !GetAtt UpdateUrlStatusFunction.Arn
+
+  UrlVerificationStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub "UrlVerificationStateMachine-${Environment}"
+      RoleArn: !GetAtt StepFunctionsRole.Arn
+      DefinitionString:
+        !Sub
+          - |-
+            {
+              "Comment": "Link Verification Workflow with Robust Error Handling",
+              "StartAt": "SetProcessing",
+              "States": {
+                "SetProcessing": {
+                  "Type": "Task",
+                  "Resource": "${UpdateUrlStatusArn}",
+                  "Parameters": {
+                    "pk.$": "$.pk",
+                    "sk.$": "$.sk",
+                    "manualStatus": "PROCESSING"
+                  },
+                  "ResultPath": null,
+                  "Next": "ParallelChecks",
+                  "Catch": [
+                    {
+                      "ErrorEquals": ["States.ALL"],
+                      "Next": "MarkAsFailed"
+                    }
+                  ]
+                },
+                "ParallelChecks": {
+                  "Type": "Parallel",
+                  "Next": "DecisionEngine",
+                  "Catch": [
+                    {
+                      "ErrorEquals": ["States.ALL"],
+                      "Next": "MarkAsFailed"
+                    }
+                  ],
+                  "Branches": [
+                    {
+                      "StartAt": "CheckLiveness",
+                      "States": {
+                        "CheckLiveness": {
+                          "Type": "Task",
+                          "Resource": "${CheckLivenessArn}",
+                          "Retry": [
+                            {
+                              "ErrorEquals": ["States.TaskFailed", "Lambda.TooManyRequestsException"],
+                              "IntervalSeconds": 2,
+                              "MaxAttempts": 3,
+                              "BackoffRate": 2.0
+                            }
+                          ],
+                          "End": true
+                        }
+                      }
+                    },
+                    {
+                      "StartAt": "ScanMalware",
+                      "States": {
+                        "ScanMalware": {
+                          "Type": "Task",
+                          "Resource": "${ScanMalwareArn}",
+                          "Retry": [
+                             {
+                              "ErrorEquals": ["States.TaskFailed", "Lambda.TooManyRequestsException"],
+                              "IntervalSeconds": 2,
+                              "MaxAttempts": 3,
+                              "BackoffRate": 2.0
+                            }
+                          ],
+                          "End": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                "DecisionEngine": {
+                  "Type": "Task",
+                  "Resource": "${UpdateUrlStatusArn}",
+                  "Parameters": {
+                    "pk.$": "$[0].pk",
+                    "sk.$": "$[0].sk",
+                    "livenessResult.$": "$[0].status",
+                    "malwareResult.$": "$[1].status"
+                  },
+                  "End": true,
+                  "Catch": [
+                    {
+                      "ErrorEquals": ["States.ALL"],
+                      "Next": "MarkAsFailed"
+                    }
+                  ]
+                },
+                "MarkAsFailed": {
+                  "Type": "Task",
+                  "Resource": "${UpdateUrlStatusArn}",
+                  "Parameters": {
+                    "pk.$": "$.pk",
+                    "sk.$": "$.sk",
+                    "manualStatus": "FAILED"
+                  },
+                  "End": true
+                }
+              }
+            }
+          - {
+              TableName: !Ref DynamoDBTableName,
+              CheckLivenessArn: !GetAtt CheckLivenessFunction.Arn,
+              ScanMalwareArn: !GetAtt ScanMalwareFunction.Arn,
+              UpdateUrlStatusArn: !GetAtt UpdateUrlStatusFunction.Arn
+            }
+
+  StateMachineArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/shortix/${Environment}/application/state-machine-arn"
+      Type: String
+      Value: !Ref UrlVerificationStateMachine
 
   # SSM Parameters
   ApiUrlParameter:
